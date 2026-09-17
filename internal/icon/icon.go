@@ -84,44 +84,50 @@ func PNG(img image.Image) []byte {
 
 // ICO wraps an image in a single-entry 32-bit ICO container, the format the
 // Windows tray requires.
-func ICO(img *image.NRGBA) []byte {
-	w, h := img.Rect.Dx(), img.Rect.Dy()
-	maskRow := ((w + 31) / 32) * 4
-	xorSize := w * h * 4
-	andSize := maskRow * h
+func ICO(img *image.NRGBA) []byte { return ICOSet(img) }
+
+// ICOSet packs several sizes of the same icon into one ICO file, each as a
+// 32-bit BGRA bitmap with an empty AND mask (alpha handles transparency).
+func ICOSet(imgs ...*image.NRGBA) []byte {
 	var buf bytes.Buffer
 	le := binary.LittleEndian
-	// ICONDIR
 	binary.Write(&buf, le, uint16(0))
 	binary.Write(&buf, le, uint16(1))
-	binary.Write(&buf, le, uint16(1))
-	// ICONDIRENTRY
-	buf.WriteByte(byte(w % 256))
-	buf.WriteByte(byte(h % 256))
-	buf.WriteByte(0)
-	buf.WriteByte(0)
-	binary.Write(&buf, le, uint16(1))
-	binary.Write(&buf, le, uint16(32))
-	binary.Write(&buf, le, uint32(40+xorSize+andSize))
-	binary.Write(&buf, le, uint32(22))
-	// BITMAPINFOHEADER
-	binary.Write(&buf, le, uint32(40))
-	binary.Write(&buf, le, int32(w))
-	binary.Write(&buf, le, int32(h*2))
-	binary.Write(&buf, le, uint16(1))
-	binary.Write(&buf, le, uint16(32))
-	binary.Write(&buf, le, uint32(0))
-	binary.Write(&buf, le, uint32(xorSize+andSize))
-	binary.Write(&buf, le, [4]int32{0, 0, 0, 0})
-	// XOR bitmap: bottom-up BGRA
-	for y := h - 1; y >= 0; y-- {
-		for x := 0; x < w; x++ {
-			c := img.NRGBAAt(x, y)
-			buf.Write([]byte{c.B, c.G, c.R, c.A})
+	binary.Write(&buf, le, uint16(len(imgs)))
+	offset := 6 + 16*len(imgs)
+	var images bytes.Buffer
+	for _, img := range imgs {
+		w, h := img.Rect.Dx(), img.Rect.Dy()
+		maskRow := ((w + 31) / 32) * 4
+		xorSize := w * h * 4
+		andSize := maskRow * h
+		// ICONDIRENTRY
+		buf.WriteByte(byte(w % 256))
+		buf.WriteByte(byte(h % 256))
+		buf.WriteByte(0)
+		buf.WriteByte(0)
+		binary.Write(&buf, le, uint16(1))
+		binary.Write(&buf, le, uint16(32))
+		binary.Write(&buf, le, uint32(40+xorSize+andSize))
+		binary.Write(&buf, le, uint32(offset+images.Len()))
+		// BITMAPINFOHEADER
+		binary.Write(&images, le, uint32(40))
+		binary.Write(&images, le, int32(w))
+		binary.Write(&images, le, int32(h*2))
+		binary.Write(&images, le, uint16(1))
+		binary.Write(&images, le, uint16(32))
+		binary.Write(&images, le, uint32(0))
+		binary.Write(&images, le, uint32(xorSize+andSize))
+		binary.Write(&images, le, [4]int32{0, 0, 0, 0})
+		for y := h - 1; y >= 0; y-- {
+			for x := 0; x < w; x++ {
+				c := img.NRGBAAt(x, y)
+				images.Write([]byte{c.B, c.G, c.R, c.A})
+			}
 		}
+		images.Write(make([]byte, andSize))
 	}
-	// AND mask: all zero (alpha channel handles transparency)
-	buf.Write(make([]byte, andSize))
+	buf.Write(images.Bytes())
 	return buf.Bytes()
 }
 

@@ -12,9 +12,9 @@ import (
 // Modifier names, in canonical display order.
 const (
 	Ctrl  = "ctrl"
-	Alt   = "alt"   // Option on macOS
+	Alt   = "alt" // Option on macOS
 	Shift = "shift"
-	Cmd   = "cmd"   // Command on macOS, Win on Windows
+	Cmd   = "cmd" // Command on macOS, Win on Windows
 )
 
 var Modifiers = []string{Ctrl, Alt, Shift, Cmd}
@@ -23,7 +23,7 @@ var modifierAliases = map[string]string{
 	"ctrl": Ctrl, "control": Ctrl,
 	"alt": Alt, "option": Alt, "opt": Alt,
 	"shift": Shift,
-	"cmd": Cmd, "command": Cmd, "win": Cmd, "super": Cmd, "meta": Cmd,
+	"cmd":   Cmd, "command": Cmd, "win": Cmd, "super": Cmd, "meta": Cmd,
 }
 
 // Keys lists every selectable non-modifier key in menu order.

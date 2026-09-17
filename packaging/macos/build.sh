@@ -20,6 +20,7 @@ fi
 rm dist/mic-off-arm64
 
 sed "s/__VERSION__/$VERSION/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
+go run ./packaging/appicon -icns "$APP/Contents/Resources/AppIcon.icns"
 # Ad-hoc signature so the binary runs on Apple Silicon. Replace "-" with a
 # Developer ID and add notarization to avoid the Gatekeeper first-run prompt.
 codesign --force --deep --sign "${CODESIGN_IDENTITY:--}" "$APP"
