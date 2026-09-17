@@ -1,0 +1,21 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  build:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - run: make test-unit vet
+      - run: make build VERSION=${GITHUB_REF_NAME#v}
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/mic-off-macos.zip
+            dist/mic-off-windows-x64.exe
+            dist/mic-off-windows-arm64.exe
