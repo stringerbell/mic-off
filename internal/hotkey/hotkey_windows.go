@@ -72,3 +72,19 @@ func (winRegistrar) Register(spec keys.Spec, onPress func()) (func(), error) {
 		hk.Unregister()
 	}, nil
 }
+
+// KeyName maps a Windows virtual-key code back to its keys name, so the
+// recorder shows exactly the key that Register would bind.
+func KeyName(vk uint32) (string, bool) {
+	switch {
+	case vk == 0x20:
+		return "space", true
+	case vk >= 0x41 && vk <= 0x5A:
+		return string(rune('a' + vk - 0x41)), true
+	case vk >= 0x30 && vk <= 0x39:
+		return string(rune('0' + vk - 0x30)), true
+	case vk >= 0x70 && vk <= 0x7B:
+		return fmt.Sprintf("f%d", vk-0x70+1), true
+	}
+	return "", false
+}

@@ -84,6 +84,21 @@ func TestDisplay(t *testing.T) {
 	}
 }
 
+// The recorder shows the modifiers being held before a key is pressed, so a
+// Spec without a Key must render cleanly (no trailing "+").
+func TestDisplayModifiersOnly(t *testing.T) {
+	held := Spec{Ctrl: true, Alt: true}
+	if got := Display(held, "darwin"); got != "⌃⌥" {
+		t.Errorf("darwin: %q", got)
+	}
+	if got := Display(held, "windows"); got != "Ctrl+Alt" {
+		t.Errorf("windows: %q", got)
+	}
+	if got := Display(Spec{}, "windows"); got != "" {
+		t.Errorf("empty: %q", got)
+	}
+}
+
 func TestKeyListIsCompleteAndUnique(t *testing.T) {
 	seen := map[string]bool{}
 	for _, k := range Keys {

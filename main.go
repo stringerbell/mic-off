@@ -21,6 +21,7 @@ import (
 	"micoff/internal/icon"
 	"micoff/internal/keys"
 	"micoff/internal/mic"
+	"micoff/internal/recorder"
 	"micoff/internal/ui"
 )
 
@@ -146,9 +147,6 @@ type tray struct {
 	status *systray.MenuItem
 	toggle *systray.MenuItem
 	hotkey *systray.MenuItem
-	keyTop *systray.MenuItem
-	mods   map[string]*systray.MenuItem
-	keys   map[string]*systray.MenuItem
 	login  *systray.MenuItem
 }
 
@@ -156,8 +154,6 @@ func newTray(ctrl *app.Controller, cfgPath string) *tray {
 	t := &tray{
 		ctrl:  ctrl,
 		icons: icon.ForPlatform(runtime.GOOS),
-		mods:  map[string]*systray.MenuItem{},
-		keys:  map[string]*systray.MenuItem{},
 	}
 	t.setState(false)
 
@@ -171,30 +167,8 @@ func newTray(ctrl *app.Controller, cfgPath string) *tray {
 	})
 
 	systray.AddSeparator()
-	t.hotkey = systray.AddMenuItem("Hotkey", "Choose the key combination")
-	for _, m := range keys.Modifiers {
-		item := t.hotkey.AddSubMenuItemCheckbox(keys.ModifierLabel(m, runtime.GOOS), "", false)
-		t.mods[m] = item
-		onClick(item, func() {
-			on := !ctrl.Spec().Modifier(m)
-			if err := ctrl.SetModifier(m, on); err != nil {
-				ui.Alert("mic-off", err.Error())
-			}
-			t.render()
-		})
-	}
-	t.hotkey.AddSeparator()
-	t.keyTop = t.hotkey.AddSubMenuItem("Key", "")
-	for _, k := range keys.Keys {
-		item := t.keyTop.AddSubMenuItemCheckbox(keys.KeyLabel(k), "", false)
-		t.keys[k] = item
-		onClick(item, func() {
-			if err := ctrl.SetKey(k); err != nil {
-				ui.Alert("mic-off", err.Error())
-			}
-			t.render()
-		})
-	}
+	t.hotkey = systray.AddMenuItem("Change hotkey…", "Press the key combination you want to use")
+	onClick(t.hotkey, t.changeHotkey)
 
 	systray.AddSeparator()
 	t.login = systray.AddMenuItemCheckbox("Start at login", "", ctrl.Config().StartAtLogin)
@@ -263,23 +237,27 @@ func (t *tray) setState(muted bool) {
 
 func (t *tray) setHotkey(keys.Spec, error) { t.render() }
 
-// render syncs every menu row with the controller's state.
+// changeHotkey opens the capture window. The current combo is released
+// while it is open so pressing it there is captured rather than toggling
+// the mic; Resume puts it back unless the user saved a new one.
+func (t *tray) changeHotkey() {
+	t.ctrl.Suspend()
+	defer t.ctrl.Resume()
+	if err := recorder.Show(t.ctrl.Spec(), t.ctrl.SetSpec); err != nil {
+		ui.Alert("mic-off", "Cannot open the hotkey window: "+err.Error())
+	}
+}
+
+// render syncs the menu rows with the controller's state.
 func (t *tray) render() {
 	if t.hotkey == nil {
 		return
 	}
-	spec := t.ctrl.Spec()
-	title := "Hotkey: " + keys.Display(spec, runtime.GOOS)
+	combo := keys.Display(t.ctrl.Spec(), runtime.GOOS)
 	if t.ctrl.HotkeyError() != nil {
-		title += "  (not available, choose another)"
-	}
-	t.hotkey.SetTitle(title)
-	t.keyTop.SetTitle("Key: " + keys.KeyLabel(spec.Key))
-	for m, item := range t.mods {
-		setChecked(item, spec.Modifier(m))
-	}
-	for k, item := range t.keys {
-		setChecked(item, k == spec.Key)
+		t.hotkey.SetTitle("Change hotkey (" + combo + " isn't working)…")
+	} else {
+		t.hotkey.SetTitle("Change hotkey (" + combo + ")…")
 	}
 	t.setState(t.ctrl.Muted())
 }

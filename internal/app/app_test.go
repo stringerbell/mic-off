@@ -95,10 +95,10 @@ func TestInvalidConfiguredHotkeyFallsBackToDefault(t *testing.T) {
 	}
 }
 
-func TestSetKeyRebindsAndSaves(t *testing.T) {
+func TestSetSpecRebindsAndSaves(t *testing.T) {
 	h := newHarness(t, config.Default())
 	h.c.Start()
-	if err := h.c.SetKey("k"); err != nil {
+	if err := h.c.SetSpec(keys.Spec{Ctrl: true, Alt: true, Key: "k"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, old := h.hk.Active["ctrl+alt+m"]; old {
@@ -115,34 +115,33 @@ func TestSetKeyRebindsAndSaves(t *testing.T) {
 	}
 }
 
-func TestSetModifierAddsAndRemoves(t *testing.T) {
-	h := newHarness(t, config.Default())
-	h.c.Start()
-	if err := h.c.SetModifier(keys.Shift, true); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.c.SetModifier(keys.Alt, false); err != nil {
-		t.Fatal(err)
-	}
-	if got := h.c.Spec().String(); got != "ctrl+shift+m" {
-		t.Fatalf("spec %q", got)
-	}
-	if !h.hk.Press("ctrl+shift+m") {
-		t.Fatal("combo not active")
-	}
-}
-
-func TestRemovingLastModifierFromLetterIsRefused(t *testing.T) {
+func TestInvalidSpecIsRefusedWithoutTouchingRegistrar(t *testing.T) {
 	h := newHarness(t, config.Config{Hotkey: "ctrl+m"})
 	h.c.Start()
-	if err := h.c.SetModifier(keys.Ctrl, false); err == nil {
+	logLen := len(h.hk.Log)
+	if err := h.c.SetSpec(keys.Spec{Key: "m"}); err == nil {
 		t.Fatal("expected validation error")
+	}
+	if len(h.hk.Log) != logLen {
+		t.Fatalf("registrar should not have been touched: %v", h.hk.Log)
 	}
 	if !h.hk.Press("ctrl+m") {
 		t.Fatal("original combo should remain active")
 	}
 	if len(h.saved) != 0 {
 		t.Fatalf("nothing should be saved: %+v", h.saved)
+	}
+}
+
+func TestSetSpecToSameComboIsNoop(t *testing.T) {
+	h := newHarness(t, config.Default())
+	h.c.Start()
+	logLen := len(h.hk.Log)
+	if err := h.c.SetSpec(h.c.Spec()); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.hk.Log) != logLen || len(h.saved) != 0 {
+		t.Fatalf("log %v saved %v", h.hk.Log, h.saved)
 	}
 }
 
@@ -161,7 +160,7 @@ func TestRegistrationFailureRestoresPreviousCombo(t *testing.T) {
 	h := newHarness(t, config.Default())
 	h.hk.Rejected["ctrl+alt+z"] = true
 	h.c.Start()
-	err := h.c.SetKey("z")
+	err := h.c.SetSpec(keys.Spec{Ctrl: true, Alt: true, Key: "z"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -194,11 +193,107 @@ func TestStartWithUnregistrableHotkeyStillAllowsMenuToggle(t *testing.T) {
 		t.Fatalf("menu toggle: muted=%v err=%v", m, err)
 	}
 	// Picking a working combo clears the error.
-	if err := h.c.SetKey("k"); err != nil {
+	if err := h.c.SetSpec(keys.Spec{Ctrl: true, Alt: true, Key: "k"}); err != nil {
 		t.Fatal(err)
 	}
 	if h.c.HotkeyError() != nil {
 		t.Fatal("error should be cleared")
+	}
+}
+
+// While the recorder dialog is open the current combo must not fire (it
+// would toggle the mic while the user is trying to re-enter it).
+func TestSuspendReleasesHotkeyAndResumeRestoresIt(t *testing.T) {
+	h := newHarness(t, config.Default())
+	h.c.Start()
+	h.c.Suspend()
+	if h.hk.Press("ctrl+alt+m") {
+		t.Fatal("combo should be released while suspended")
+	}
+	if h.c.HotkeyError() != nil {
+		t.Fatalf("suspension is not an error: %v", h.c.HotkeyError())
+	}
+	h.c.Suspend() // idempotent
+	h.c.Resume()
+	if !h.hk.Press("ctrl+alt+m") {
+		t.Fatalf("combo not restored: %v", h.hk.Log)
+	}
+	h.c.Resume() // idempotent: no double registration
+	if len(h.hk.Active) != 1 {
+		t.Fatalf("active: %v", h.hk.Active)
+	}
+	if len(h.saved) != 0 {
+		t.Fatalf("suspend/resume must not save: %+v", h.saved)
+	}
+}
+
+// The dialog's Save path: SetSpec while suspended binds the new combo and
+// the deferred Resume must not put the old one back.
+func TestSetSpecWhileSuspendedBindsNewComboAndResumeIsNoop(t *testing.T) {
+	h := newHarness(t, config.Default())
+	h.c.Start()
+	h.c.Suspend()
+	if err := h.c.SetSpec(keys.Spec{Cmd: true, Shift: true, Key: "k"}); err != nil {
+		t.Fatal(err)
+	}
+	h.c.Resume()
+	if !h.hk.Press("shift+cmd+k") {
+		t.Fatal("new combo not active")
+	}
+	if h.hk.Press("ctrl+alt+m") {
+		t.Fatal("old combo must not come back")
+	}
+	if len(h.hk.Active) != 1 {
+		t.Fatalf("active: %v", h.hk.Active)
+	}
+	if len(h.saved) != 1 || h.saved[0].Hotkey != "shift+cmd+k" {
+		t.Fatalf("saved: %+v", h.saved)
+	}
+}
+
+// The dialog's "OS refused it" path: the failed combo is not saved, the old
+// one stays released (the dialog is still open), and Resume restores it.
+func TestFailedSetSpecWhileSuspendedStaysReleasedUntilResume(t *testing.T) {
+	h := newHarness(t, config.Default())
+	h.hk.Rejected["ctrl+alt+z"] = true
+	h.c.Start()
+	h.c.Suspend()
+	if err := h.c.SetSpec(keys.Spec{Ctrl: true, Alt: true, Key: "z"}); err == nil {
+		t.Fatal("expected error")
+	}
+	if len(h.hk.Active) != 0 {
+		t.Fatalf("still suspended, nothing should be bound: %v", h.hk.Active)
+	}
+	if h.c.HotkeyError() != nil {
+		t.Fatalf("a refused candidate is not the current combo's error: %v", h.c.HotkeyError())
+	}
+	h.c.Resume()
+	if !h.hk.Press("ctrl+alt+m") {
+		t.Fatalf("previous combo not restored: %v", h.hk.Log)
+	}
+	if h.c.Spec().String() != "ctrl+alt+m" || h.c.HotkeyError() != nil {
+		t.Fatalf("spec %s err %v", h.c.Spec(), h.c.HotkeyError())
+	}
+	if len(h.saved) != 0 {
+		t.Fatalf("failed change must not be saved: %+v", h.saved)
+	}
+}
+
+// Re-choosing the current combo from the dialog while it is suspended must
+// bind it again (Resume would otherwise, but SetSpec clears the suspension).
+func TestSetSpecToSameComboWhileSuspendedRebinds(t *testing.T) {
+	h := newHarness(t, config.Default())
+	h.c.Start()
+	h.c.Suspend()
+	if err := h.c.SetSpec(h.c.Spec()); err != nil {
+		t.Fatal(err)
+	}
+	if !h.hk.Press("ctrl+alt+m") {
+		t.Fatal("combo should be bound again")
+	}
+	h.c.Resume()
+	if len(h.hk.Active) != 1 || len(h.saved) != 0 {
+		t.Fatalf("active %v saved %v", h.hk.Active, h.saved)
 	}
 }
 

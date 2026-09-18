@@ -34,10 +34,12 @@ One small file, nothing to install, no accounts, no permissions prompts.
 
 ### Changing the hotkey
 
-Click the microphone icon → **Hotkey**. Tick the modifiers you want and pick
-the key under **Key**. It takes effect immediately and is remembered.
-Function keys (F1–F12) can be used on their own; anything else needs at
-least one modifier so ordinary typing isn't hijacked.
+Click the microphone icon → **Change hotkey…**, press the combination you
+want, then click **Save** (or press Return). Escape cancels. The window
+tells you when a combination can't be used and won't let you save it:
+function keys (F1–F12) can be used on their own, anything else needs at
+least one modifier so ordinary typing isn't hijacked, and a combination the
+system refuses to register is reported without changing anything.
 
 ### Other menu items
 

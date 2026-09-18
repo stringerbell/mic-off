@@ -41,7 +41,8 @@ type Controller struct {
 	cfg        config.Config
 	spec       keys.Spec
 	unregister func()
-	hotkeyErr  error
+	hotkeyErr  error // why spec is not registered (nil when it is, or while suspended)
+	suspended  bool  // hotkey deliberately released while the recorder dialog is open
 	muted      bool
 	known      bool // muted has been read from the device at least once
 }
@@ -75,27 +76,59 @@ func (c *Controller) Start() {
 	c.mu.Lock()
 	c.spec = spec
 	c.cfg.Hotkey = spec.String()
-	c.register(spec)
+	c.hotkeyErr = c.register(spec)
 	spec, hkErr := c.spec, c.hotkeyErr
 	c.mu.Unlock()
 	c.d.OnHotkey(spec, hkErr)
 	c.Refresh()
 }
 
-// register binds spec and records the outcome. Caller holds c.mu.
-func (c *Controller) register(spec keys.Spec) {
+// register releases whatever is bound and binds spec instead. On failure
+// nothing is bound. Caller holds c.mu.
+func (c *Controller) register(spec keys.Spec) error {
 	if c.unregister != nil {
 		c.unregister()
 		c.unregister = nil
 	}
 	unreg, err := c.d.Hotkeys.Register(spec, c.onHotkeyPressed)
-	c.hotkeyErr = err
 	if err != nil {
 		c.d.Logf("could not register hotkey %s: %v", spec, err)
-		return
+		return err
 	}
 	c.unregister = unreg
 	c.d.Logf("hotkey %s registered", spec)
+	return nil
+}
+
+// Suspend releases the hotkey while the recorder dialog is open, so that
+// pressing the current combination there is captured by the dialog instead
+// of toggling the microphone. Resume binds it again.
+func (c *Controller) Suspend() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.suspended {
+		return
+	}
+	c.suspended = true
+	if c.unregister != nil {
+		c.unregister()
+		c.unregister = nil
+	}
+}
+
+// Resume re-binds the hotkey after Suspend. It is a no-op if SetSpec has
+// already bound a new combination in the meantime.
+func (c *Controller) Resume() {
+	c.mu.Lock()
+	if !c.suspended {
+		c.mu.Unlock()
+		return
+	}
+	c.suspended = false
+	c.hotkeyErr = c.register(c.spec)
+	spec, hkErr := c.spec, c.hotkeyErr
+	c.mu.Unlock()
+	c.d.OnHotkey(spec, hkErr)
 }
 
 func (c *Controller) onHotkeyPressed() {
@@ -176,42 +209,39 @@ func (c *Controller) Config() config.Config {
 	return c.cfg
 }
 
-// SetModifier turns one modifier on or off in the current combo.
-func (c *Controller) SetModifier(name string, on bool) error {
-	return c.SetSpec(c.Spec().WithModifier(name, on))
-}
-
-// SetKey changes the non-modifier key of the current combo.
-func (c *Controller) SetKey(key string) error {
-	return c.SetSpec(c.Spec().WithKey(key))
-}
-
-// SetSpec switches to a new combo. If the new combo cannot be registered the
-// previous one is restored and the error returned; nothing is saved.
+// SetSpec switches to a new combo and saves it. It is all-or-nothing: an
+// invalid combo is refused before touching anything, and one the OS will
+// not register leaves the previous combo in place (still bound, or still
+// released if Suspend is in effect) and nothing saved.
 func (c *Controller) SetSpec(spec keys.Spec) error {
 	if err := spec.Validate(); err != nil {
 		return err
 	}
 	c.mu.Lock()
 	old := c.spec
-	if spec == old && c.hotkeyErr == nil {
+	if spec == old && c.hotkeyErr == nil && !c.suspended {
 		c.mu.Unlock()
 		return nil
 	}
-	c.register(spec)
-	if c.hotkeyErr != nil {
-		err := fmt.Errorf("%s is not available: %w", keys.Display(spec, ""), c.hotkeyErr)
-		c.register(old) // best effort: put the previous combo back
-		spec, hkErr := c.spec, c.hotkeyErr
+	if err := c.register(spec); err != nil {
+		if !c.suspended {
+			c.hotkeyErr = c.register(old) // best effort: put the previous combo back
+		}
+		cur, hkErr := c.spec, c.hotkeyErr
 		c.mu.Unlock()
-		c.d.OnHotkey(spec, hkErr)
+		c.d.OnHotkey(cur, hkErr)
 		return err
 	}
 	c.spec = spec
+	c.hotkeyErr = nil
+	c.suspended = false
 	c.cfg.Hotkey = spec.String()
 	cfg := c.cfg
 	c.mu.Unlock()
 	c.d.OnHotkey(spec, nil)
+	if spec == old {
+		return nil
+	}
 	if err := c.d.Save(cfg); err != nil {
 		c.d.Logf("saving config: %v", err)
 		return fmt.Errorf("hotkey changed but could not be saved: %w", err)

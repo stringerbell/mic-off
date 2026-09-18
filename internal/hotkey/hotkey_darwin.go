@@ -92,6 +92,9 @@ func (carbonRegistrar) Register(spec keys.Spec, onPress func()) (func(), error) 
 		mu.Lock()
 		delete(callbacks, id)
 		mu.Unlock()
+		if int(st) == -9878 { // eventHotKeyExistsErr
+			return nil, fmt.Errorf("already in use by the system or another app")
+		}
 		return nil, fmt.Errorf("RegisterEventHotKey failed (status %d)", int(st))
 	}
 	return func() {
@@ -101,3 +104,18 @@ func (carbonRegistrar) Register(spec keys.Spec, onPress func()) (func(), error) 
 		mu.Unlock()
 	}, nil
 }
+
+// KeyName maps a Carbon virtual key code back to its keys name, so the
+// recorder shows exactly the key that Register would bind.
+func KeyName(code uint32) (string, bool) {
+	name, ok := macKeyNames[code]
+	return name, ok
+}
+
+var macKeyNames = func() map[uint32]string {
+	m := map[uint32]string{}
+	for name, code := range macKeyCodes {
+		m[code] = name
+	}
+	return m
+}()

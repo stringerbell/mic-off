@@ -185,7 +185,9 @@ func ModifierLabel(mod, platform string) string {
 }
 
 // Display renders the combo the way the platform's users expect:
-// "⌃⌥M" on macOS, "Ctrl+Alt+M" elsewhere.
+// "⌃⌥M" on macOS, "Ctrl+Alt+M" elsewhere. A Spec with no Key renders just
+// the modifiers ("⌃⌥" / "Ctrl+Alt"), which the hotkey recorder uses to show
+// what is being held down.
 func Display(s Spec, platform string) string {
 	if platform == "darwin" {
 		var b strings.Builder
@@ -210,5 +212,8 @@ func Display(s Spec, platform string) string {
 			parts = append(parts, ModifierLabel(m, platform))
 		}
 	}
-	return strings.Join(append(parts, KeyLabel(s.Key)), "+")
+	if s.Key != "" {
+		parts = append(parts, KeyLabel(s.Key))
+	}
+	return strings.Join(parts, "+")
 }

@@ -24,3 +24,15 @@ func TestEverySelectableKeyHasMacCode(t *testing.T) {
 		seen[code] = name
 	}
 }
+
+func TestKeyNameRoundTrips(t *testing.T) {
+	for _, k := range keys.Keys {
+		name, ok := KeyName(macKeyCodes[k])
+		if !ok || name != k {
+			t.Errorf("KeyName(%d) = %q, %v; want %q", macKeyCodes[k], name, ok, k)
+		}
+	}
+	if _, ok := KeyName(53); ok { // Escape is not a hotkey key
+		t.Error("escape should be unknown")
+	}
+}

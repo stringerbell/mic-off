@@ -24,3 +24,19 @@ func TestEverySelectableKeyHasWindowsCode(t *testing.T) {
 		t.Errorf("0 = %#x", c)
 	}
 }
+
+func TestKeyNameRoundTrips(t *testing.T) {
+	for _, k := range keys.Keys {
+		code, _ := winKeyCode(k)
+		name, ok := KeyName(uint32(code))
+		if !ok || name != k {
+			t.Errorf("KeyName(%#x) = %q, %v; want %q", code, name, ok, k)
+		}
+	}
+	if _, ok := KeyName(0x1B); ok { // Escape is not a hotkey key
+		t.Error("escape should be unknown")
+	}
+	if _, ok := KeyName(0x7C); ok { // F13 is outside the supported range
+		t.Error("f13 should be unknown")
+	}
+}
